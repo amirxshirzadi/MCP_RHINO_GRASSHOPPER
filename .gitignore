@@ -1,0 +1,42 @@
+# Secrets
+.env
+.env.*
+*.pem
+*.key
+credentials*.json
+
+# Claude Code (réglages locaux personnels)
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Node
+node_modules/
+
+# .NET / C# (plugins Rhino / Grasshopper)
+bin/
+obj/
+.vs/
+*.user
+*.suo
+
+# Rhino
+*.3dmbak
+*.rhl
+*.bak
+
+# Éditeurs / OS
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+Thumbs.db
+Desktop.ini
+.DS_Store

@@ -1,4 +1,4 @@
-# Enregistre (commit) et publie (push) sur GitHub toutes les modifications en cours.
+﻿# Enregistre (commit) et publie (push) sur GitHub toutes les modifications en cours.
 # Usage :  .\scripts\valider.ps1 "Message du commit"
 #          .\scripts\valider.ps1            (message par défaut horodaté)
 

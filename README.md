@@ -4,9 +4,11 @@ Serveur MCP (Model Context Protocol) pour piloter Rhino et Grasshopper.
 
 ## Valider et publier une modification
 
-Rien n'est envoyé sur GitHub sans validation. Après avoir relu une modification :
+Rien n'est envoyé sur GitHub sans validation. Après avoir relu une modification, dans VS Code :
 
-- **Dans Claude Code** : tape `/valider` (ou `/valider Mon message de commit`).
-- **Depuis un terminal** : `.\scripts\valider.ps1 "Mon message de commit"`
+1. Ouvre l'onglet **Contrôle de code source** (Ctrl+Maj+G).
+2. Écris le message du commit.
+3. Clique sur **Commit**.
 
-Les deux commandes enregistrent (commit) toutes les modifications en cours et les publient (push) sur GitHub.
+Toutes les modifications en cours sont enregistrées (commit) puis envoyées (push) automatiquement sur GitHub
+(réglages dans [.vscode/settings.json](.vscode/settings.json)).

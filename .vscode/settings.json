@@ -1,0 +1,12 @@
+{
+  // Après chaque clic sur "Commit", envoyer automatiquement le commit sur GitHub
+  "git.postCommitCommand": "push",
+
+  // Cliquer sur "Commit" sans avoir rien indexé (staged) : inclure toutes les modifications, y compris les nouveaux fichiers
+  "git.enableSmartCommit": true,
+  "git.smartCommitChanges": "all",
+  "git.suggestSmartCommit": false,
+
+  // Pas de fenêtre de confirmation avant l'envoi
+  "git.confirmSync": false
+}

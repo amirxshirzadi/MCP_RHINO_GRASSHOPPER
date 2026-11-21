@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "rhino": {
+      "command": "${USERPROFILE}/.rhinocode/py39-rh8/python.exe",
+      "args": ["-u", "server/rhino_mcp_server.py"],
+      "env": {
+        "RHINO_MCP_PORT": "1999"
+      }
+    }
+  }
+}

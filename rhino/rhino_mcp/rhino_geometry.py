@@ -6,8 +6,8 @@ import Rhino.Geometry as G
 from Rhino.Geometry.Intersect import Intersection
 
 from .registry import McpError, command
-from .util import (Undo, add_geometry, attributes, created, find_objects, to_plane, to_point, to_points, to_vector,
-                   typed_list)
+from .util import (Undo, add_geometry, attributes, created, enum_value, find_objects, to_plane, to_point, to_points,
+                   to_vector, typed_list)
 
 SHAPES = ("point", "line", "polyline", "curve", "circle", "arc", "ellipse", "rectangle", "polygon",
           "plane_surface", "sphere", "box", "cylinder", "cone", "torus", "mesh")
@@ -239,7 +239,7 @@ def rhino_geometry_operation(operation, ids, other_ids=None, rail_id=None, vecto
                                          bool(closed), tol)
             results = _cap(list(res or []), tol, cap)
         elif op == "pipe":
-            mode = G.PipeCapMode.Flat if cap else getattr(G.PipeCapMode, "None")
+            mode = enum_value(G.PipeCapMode, "Flat" if cap else "None")
             for o in objs:
                 results += list(G.Brep.CreatePipe(_curve(o), float(_need(radius, "radius", op)), False, mode, True,
                                                   tol, d.ModelAngleToleranceRadians) or [])

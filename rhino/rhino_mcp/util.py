@@ -42,6 +42,15 @@ def close_dangling_undo_records(d):
         d.EndUndoRecord(d.CurrentUndoRecordSerialNumber)
 
 
+def enum_value(enum_type, name):
+    """Valeur d'énumération .NET par son nom ; marche aussi pour « None », mot réservé en Python."""
+    try:
+        return getattr(enum_type, name)
+    except AttributeError:
+        import clr
+        return System.Enum.Parse(clr.GetClrType(enum_type), name)
+
+
 def impl(o):
     """pythonnet 3 renvoie parfois une vue « interface » : récupère l'objet réel."""
     return getattr(o, "__implementation__", o)

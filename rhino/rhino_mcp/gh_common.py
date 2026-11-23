@@ -144,10 +144,34 @@ def describe(o):
         d["value"] = o.UserText
     elif tname == "GH_BooleanToggle":
         d["value"] = bool(o.Value)
+    elif tname == "GH_ValueList":
+        d["value"] = [item.Name for item in o.SelectedItems]
+        d["items"] = [item.Name for item in list(o.ListItems)[:50]]
+    elif tname == "GH_ColourSwatch":
+        c = o.SwatchColour
+        d["value"] = [int(c.R), int(c.G), int(c.B), int(c.A)]
+    elif tname == "GH_Group":
+        d["members"] = [str(g) for g in o.ObjectIDs]
+    elif tname == "GH_Scribble":
+        d["text"] = o.Text
+    if hasattr(o, "Locked"):
+        d["enabled"] = not o.Locked
+    if hasattr(o, "Hidden"):
+        d["preview"] = not o.Hidden
     msgs = messages(o)
     if msgs:
         d["messages"] = msgs
     return d
+
+
+def free_position(gdoc):
+    """Place libre à droite de tout ce qui est déjà sur le canevas."""
+    objs = [impl(o) for o in gdoc.Objects]
+    if not objs:
+        return 100.0, 100.0
+    right = max(o.Attributes.Bounds.Right for o in objs)
+    top = min(o.Attributes.Bounds.Top for o in objs)
+    return right + 60.0, top
 
 
 def proxies(gh):

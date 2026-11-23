@@ -26,8 +26,17 @@ TIMEOUT = float(os.environ.get("RHINO_MCP_TIMEOUT", "120"))
 DEFAULT_PROTOCOL = "2025-06-18"
 SERVER_INFO = {"name": "rhino-grasshopper", "version": "0.2.0"}
 INSTRUCTIONS = (
-    "Pilote Rhino 8 et Grasshopper ouverts sur cet ordinateur. Commence par rhino_ping. "
-    "Utilise rhino_capture_view pour vérifier visuellement un résultat."
+    "Pilote Rhino 8 et Grasshopper ouverts sur cet ordinateur (accès complet). Commence par rhino_ping.\n"
+    "- Préfère les outils dédiés : rhino_document (fichiers), rhino_get_objects / rhino_get_object_details, "
+    "rhino_create_geometry et rhino_geometry_operation (géométrie), rhino_transform_objects, rhino_modify_objects, "
+    "rhino_layer / rhino_material / rhino_block, rhino_view / rhino_annotation / rhino_layout (PDF). Grasshopper : "
+    "gh_add_component, gh_connect, gh_set_value, gh_solve, gh_get_output, gh_bake ; gh_get_canvas pour comprendre "
+    "une définition existante.\n"
+    "- Vérifie visuellement avec rhino_capture_view et gh_capture_canvas.\n"
+    "- Pour tout le reste : rhino_run_command (commande Rhino en version « tiret », macro complète) ou "
+    "rhino_execute_python (RhinoCommon et API Grasshopper complets).\n"
+    "- Chaque modification est une étape d'annulation (rhino_undo). Ne remplace jamais un document non enregistré "
+    "(discard_changes) ni un fichier existant (overwrite) sans l'accord explicite de l'utilisateur."
 )
 
 

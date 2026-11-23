@@ -344,6 +344,16 @@ def add_geometry(d, geometry, attrs):
     return gid
 
 
+def find_material(d, name):
+    """Matériau de rendu du document par nom (insensible à la casse)."""
+    wanted = str(name).strip().lower()
+    for m in d.RenderMaterials:
+        if (m.Name or "").lower() == wanted:
+            return m
+    names = ", ".join(sorted(m.Name for m in d.RenderMaterials)) or "aucun"
+    raise McpError("Matériau introuvable : %s. Matériaux du document : %s" % (name, names))
+
+
 def created(d, ids):
     """Résultat standard d'une création : identifiants + résumé des objets."""
     objs = [d.Objects.FindId(i) for i in ids]

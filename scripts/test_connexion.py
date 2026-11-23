@@ -254,6 +254,66 @@ def rhino_plugins(ctx):
     check("Sphere" in r.get("commands", []), "commande Sphere absente : %s" % r.get("commands"))
 
 
+def bbox_of(ctx, obj_id):
+    o = ctx.call("rhino_get_object_details", {"ids": [obj_id]})["objects"][0]
+    return o["bbox_min"], o["bbox_max"]
+
+
+def near(a, b, tol=1e-6):
+    return all(abs(x - y) <= tol for x, y in zip(a, b))
+
+
+@test("rhino_get_object_details", "rhino_modify_objects", "rhino_select_objects", "rhino_transform_objects",
+      "rhino_delete_objects")
+def rhino_objets(ctx):
+    box = add_box(ctx, 10, name="boite_objets")
+    geo = ctx.call("rhino_get_object_details", {"ids": [box]})["objects"][0]["geometry"]
+    check(geo.get("solid") and abs(geo.get("volume", 0) - 1000) < 1e-6, "volume/solide inattendus : %s" % geo)
+
+    ctx.call("rhino_modify_objects", {"ids": [box], "name": "cube", "layer": "Test MCP::Objets",
+                                      "color": [255, 0, 0], "user_text": {"projet": "essai"}})
+    det = ctx.call("rhino_get_object_details", {"ids": [box]})["objects"][0]
+    check(det["name"] == "cube" and det["layer"] == "Test MCP::Objets" and det["color"] == [255, 0, 0]
+          and det["user_text"].get("projet") == "essai", "modification d'attributs inattendue : %s" % det)
+    found = ctx.call("rhino_get_objects", {"layer": "Test MCP::Objets", "type": "brep", "name": "cub"})
+    check(found["total"] == 1, "filtres de rhino_get_objects : %s" % found)
+
+    sel = ctx.call("rhino_select_objects", {"action": "select", "layer": "Test MCP::Objets"})
+    check(sel["selected_count"] == 1, "sélection par calque : %s" % sel)
+    check(ctx.call("rhino_select_objects", {"action": "get"})["selected_count"] == 1, "lecture de la sélection")
+    check(ctx.call("rhino_select_objects", {"action": "clear"})["selected_count"] == 0, "désélection")
+
+    ctx.call("rhino_transform_objects", {"ids": [box], "operation": "move", "vector": [100, 0, 0]})
+    check(near(bbox_of(ctx, box)[0], [100, 0, 0]), "move : %s" % (bbox_of(ctx, box),))
+    copy = ctx.call("rhino_transform_objects", {"ids": [box], "operation": "copy", "vector": [0, 50, 0]})
+    arr = ctx.call("rhino_transform_objects", {"ids": [box], "operation": "array_linear", "count": 3,
+                                               "vector": [20, 0, 0]})
+    check(copy["count"] == 1 and arr["count"] == 2 and box not in arr["ids"], "copie/réseau : %s %s" % (copy, arr))
+    polar = ctx.call("rhino_transform_objects", {"ids": [box], "operation": "array_polar", "count": 4,
+                                                 "center": [0, 0, 0]})
+    check(polar["count"] == 3, "réseau polaire : %s" % polar)
+    ctx.call("rhino_transform_objects", {"ids": [box], "operation": "scale", "factor": 2})  # autour du centre
+    lo, hi = bbox_of(ctx, box)
+    check(near(lo, [95, -5, -5]) and near(hi, [115, 15, 15]), "scale x2 : %s" % ((lo, hi),))
+    ctx.call("rhino_transform_objects", {"ids": [box], "operation": "rotate", "angle": 90, "center": [0, 0, 0]})
+    lo, hi = bbox_of(ctx, box)
+    check(near(lo, [-15, 95, -5]) and near(hi, [5, 115, 15]), "rotate 90° autour de l'origine : %s" % ((lo, hi),))
+    ctx.call("rhino_transform_objects", {"ids": [box], "operation": "mirror", "plane": "zx", "center": [0, 0, 0]})
+    lo, hi = bbox_of(ctx, box)
+    check(hi[1] < -90, "mirror par le plan ZX : %s" % ((lo, hi),))
+
+    ctx.call("rhino_modify_objects", {"ids": [box], "visible": False})
+    check(ctx.call("rhino_get_object_details", {"ids": [box]})["objects"][0]["hidden"], "masquer")
+    ctx.call("rhino_modify_objects", {"ids": [box], "visible": True, "locked": True})
+    check(ctx.call("rhino_get_object_details", {"ids": [box]})["objects"][0]["locked"], "verrouiller")
+
+    everything = [box] + copy["ids"] + arr["ids"] + polar["ids"]
+    gone = ctx.call("rhino_delete_objects", {"ids": everything})
+    check(len(gone["deleted"]) == len(everything) and not gone["failed"], "suppression (même verrouillé) : %s" % gone)
+    ctx.call_error("rhino_get_object_details", {"ids": [box]}, contains="introuvable")
+    ctx.call_error("rhino_transform_objects", {"ids": [box], "operation": "teleport"}, contains="introuvable")
+
+
 @test("rhino_execute_python", "rhino_get_objects")
 def rhino_python_et_objets(ctx):
     code = (

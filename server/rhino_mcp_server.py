@@ -6,6 +6,9 @@ Relaie chaque outil vers l'écouteur lancé dans Rhino (rhino/rhino_mcp_listener
 via une connexion TCP locale. Bibliothèque standard uniquement (Python 3.9+) :
 il tourne avec le Python fourni par Rhino 8, sans rien installer.
 
+Ce fichier ne gère que le protocole MCP ; les outils sont déclarés dans server/tools/
+(un fichier par domaine) et implémentés côté Rhino dans rhino/rhino_mcp/.
+
 Variables d'environnement : RHINO_MCP_HOST (127.0.0.1), RHINO_MCP_PORT (1999),
 RHINO_MCP_TIMEOUT en secondes (120).
 """
@@ -14,173 +17,22 @@ import os
 import socket
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from tools import TOOLS, TOOLS_BY_NAME  # noqa: E402
+
 HOST = os.environ.get("RHINO_MCP_HOST", "127.0.0.1")
 PORT = int(os.environ.get("RHINO_MCP_PORT", "1999"))
 TIMEOUT = float(os.environ.get("RHINO_MCP_TIMEOUT", "120"))
 DEFAULT_PROTOCOL = "2025-06-18"
-SERVER_INFO = {"name": "rhino-grasshopper", "version": "0.1.0"}
+SERVER_INFO = {"name": "rhino-grasshopper", "version": "0.2.0"}
+INSTRUCTIONS = (
+    "Pilote Rhino 8 et Grasshopper ouverts sur cet ordinateur. Commence par rhino_ping. "
+    "Utilise rhino_capture_view pour vérifier visuellement un résultat."
+)
 
-ID_PROP = {"type": "string", "description": "Identifiant (InstanceGuid) de l'objet Grasshopper."}
-PARAM_KEY = {"type": ["integer", "string"], "description": "Index (0, 1, ...) ou nom du paramètre."}
 
-TOOLS = [
-    {
-        "name": "rhino_ping",
-        "command": "ping",
-        "description": "Vérifie que Rhino est joignable et renvoie la version de Rhino et le document ouvert.",
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "rhino_get_document_info",
-        "command": "get_document_info",
-        "description": "Infos sur le document Rhino actif : unités, tolérance, calques, nombre d'objets par type, vues.",
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "rhino_get_objects",
-        "command": "get_objects",
-        "description": "Liste les objets du document Rhino (id, type, nom, calque, boîte englobante), avec pagination.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "layer": {"type": "string", "description": "Ne garder que ce calque (chemin complet)."},
-                "selected_only": {"type": "boolean", "description": "Seulement les objets sélectionnés."},
-                "limit": {"type": "integer", "default": 200},
-                "offset": {"type": "integer", "default": 0},
-            },
-        },
-    },
-    {
-        "name": "rhino_execute_python",
-        "command": "execute_python",
-        "description": (
-            "Exécute du code Python 3 dans Rhino 8 (une seule étape d'annulation). Disponibles : Rhino (RhinoCommon), "
-            "rs (rhinoscriptsyntax), sc (scriptcontext), System, doc (document actif), get_gh_doc() (document "
-            "Grasshopper ; `import Grasshopper` pour l'API). Affecte la variable `result` pour renvoyer une valeur ; "
-            "print() est aussi renvoyé. Outil polyvalent pour tout ce que les autres outils ne couvrent pas."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {"code": {"type": "string", "description": "Code Python 3 à exécuter."}},
-            "required": ["code"],
-        },
-    },
-    {
-        "name": "rhino_capture_view",
-        "command": "capture_view",
-        "description": "Capture une vue Rhino en image PNG (vue active par défaut) pour voir le résultat.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "view": {"type": "string", "description": "Nom de la vue (Perspective, Top, ...)."},
-                "width": {"type": "integer", "default": 900},
-                "height": {"type": "integer", "default": 600},
-            },
-        },
-    },
-    {
-        "name": "gh_get_canvas",
-        "command": "gh_get_canvas",
-        "description": (
-            "Décrit le document Grasshopper ouvert (l'ouvre si besoin) : composants, entrées/sorties, connexions, "
-            "valeurs des curseurs/panneaux/interrupteurs, erreurs et avertissements."
-        ),
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "gh_search_components",
-        "command": "gh_search_components",
-        "description": "Cherche des composants Grasshopper installés par nom, surnom, catégorie ou description.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "query": {"type": "string", "description": "Texte à chercher (ex. 'circle', 'divide curve')."},
-                "limit": {"type": "integer", "default": 30},
-            },
-            "required": ["query"],
-        },
-    },
-    {
-        "name": "gh_add_component",
-        "command": "gh_add_component",
-        "description": (
-            "Ajoute un composant sur le canevas Grasshopper, par nom exact (ex. 'Circle', 'Number Slider', 'Panel', "
-            "'Boolean Toggle') ou par guid (voir gh_search_components). Renvoie son id et ses paramètres."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "guid": {"type": "string"},
-                "x": {"type": "number", "default": 0},
-                "y": {"type": "number", "default": 0},
-                "nickname": {"type": "string"},
-            },
-        },
-    },
-    {
-        "name": "gh_connect",
-        "command": "gh_connect",
-        "description": "Relie une sortie d'un objet Grasshopper à une entrée d'un autre (ou les déconnecte).",
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "source_id": ID_PROP,
-                "source_output": PARAM_KEY,
-                "target_id": ID_PROP,
-                "target_input": PARAM_KEY,
-                "disconnect": {"type": "boolean", "default": False},
-            },
-            "required": ["source_id", "target_id"],
-        },
-    },
-    {
-        "name": "gh_set_value",
-        "command": "gh_set_value",
-        "description": (
-            "Règle la valeur d'un curseur (Number Slider : value, min, max, decimals), d'un panneau (texte) ou d'un "
-            "interrupteur (Boolean Toggle : true/false)."
-        ),
-        "inputSchema": {
-            "type": "object",
-            "properties": {
-                "id": ID_PROP,
-                "value": {"description": "Nouvelle valeur."},
-                "min": {"type": "number"},
-                "max": {"type": "number"},
-                "decimals": {"type": "integer", "description": "0 = curseur entier."},
-            },
-            "required": ["id", "value"],
-        },
-    },
-    {
-        "name": "gh_get_output",
-        "command": "gh_get_output",
-        "description": "Lit les données calculées d'une sortie Grasshopper (arbre de données, sous forme de texte).",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"id": ID_PROP, "output": PARAM_KEY, "limit": {"type": "integer", "default": 200}},
-            "required": ["id"],
-        },
-    },
-    {
-        "name": "gh_solve",
-        "command": "gh_solve",
-        "description": "Recalcule toute la définition Grasshopper et liste les composants en erreur ou en avertissement.",
-        "inputSchema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "gh_delete",
-        "command": "gh_delete",
-        "description": "Supprime des objets du canevas Grasshopper.",
-        "inputSchema": {
-            "type": "object",
-            "properties": {"ids": {"type": "array", "items": {"type": "string"}}},
-            "required": ["ids"],
-        },
-    },
-]
-TOOLS_BY_NAME = {t["name"]: t for t in TOOLS}
+class RhinoError(Exception):
+    """Rhino injoignable ou réponse inexploitable : message destiné à l'utilisateur."""
 
 
 def log(msg):
@@ -189,48 +41,72 @@ def log(msg):
 
 
 def call_rhino(command, params):
+    """Envoie une commande à l'écouteur de Rhino et renvoie sa réponse JSON."""
     try:
         conn = socket.create_connection((HOST, PORT), timeout=5)
     except OSError:
-        raise RuntimeError(
+        raise RhinoError(
             "Rhino ne répond pas sur %s:%d. Ouvre Rhino 8 et lance l'écouteur : commande MCPStart "
             "(ou _-RunPythonScript sur rhino/rhino_mcp_listener.py)." % (HOST, PORT)
         )
+    chunks = []
     with conn:
         conn.settimeout(TIMEOUT)
-        conn.sendall((json.dumps({"command": command, "params": params}) + "\n").encode("utf-8"))
-        chunks = []
-        while True:
-            chunk = conn.recv(1 << 20)
-            if not chunk:
-                break
-            chunks.append(chunk)
-            if chunk.endswith(b"\n"):
-                break
-    return json.loads(b"".join(chunks).decode("utf-8"))
+        try:
+            conn.sendall((json.dumps({"command": command, "params": params}) + "\n").encode("utf-8"))
+            while True:
+                chunk = conn.recv(1 << 20)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                if chunk.endswith(b"\n"):
+                    break
+        except socket.timeout:
+            raise RhinoError(
+                "Rhino n'a pas répondu en %d s (commande « %s »). Une boîte de dialogue attend peut-être "
+                "une réponse dans Rhino, ou l'opération est très longue (augmente RHINO_MCP_TIMEOUT)."
+                % (TIMEOUT, command)
+            )
+        except OSError as ex:
+            raise RhinoError("Connexion à Rhino interrompue pendant « %s » : %s" % (command, ex))
+    data = b"".join(chunks)
+    if not data.strip():
+        raise RhinoError(
+            "Rhino a fermé la connexion sans répondre (commande « %s »). L'écouteur vient peut-être "
+            "d'être relancé : réessaie." % command
+        )
+    try:
+        return json.loads(data.decode("utf-8"))
+    except ValueError:
+        raise RhinoError("Réponse illisible de Rhino pour « %s »." % command)
 
 
 def text(s):
     return {"type": "text", "text": s}
 
 
+def error_result(message):
+    return {"content": [text(message)], "isError": True}
+
+
 def call_tool(name, args):
-    tool = TOOLS_BY_NAME.get(name)
-    if tool is None:
-        return {"content": [text("Outil inconnu : %s" % name)], "isError": True}
+    if name not in TOOLS_BY_NAME:
+        return error_result("Outil inconnu : %s" % name)
     try:
-        resp = call_rhino(tool["command"], args or {})
-    except Exception as ex:
-        return {"content": [text(str(ex))], "isError": True}
+        resp = call_rhino(name, args or {})
+    except RhinoError as ex:
+        return error_result(str(ex))
     if not resp.get("ok"):
-        return {"content": [text("Erreur dans Rhino : %s\n\n%s" % (resp.get("error"), resp.get("traceback", "")))],
-                "isError": True}
+        message = "Erreur dans Rhino : %s" % resp.get("error")
+        if resp.get("traceback"):
+            message += "\n\n" + resp["traceback"]
+        return error_result(message)
     result = resp.get("result")
-    if name == "rhino_capture_view":
-        return {"content": [
-            {"type": "image", "data": result["image_base64"], "mimeType": "image/png"},
-            text("Vue : %s" % result.get("view")),
-        ]}
+    if isinstance(result, dict) and result.get("image_base64"):
+        # Capture d'écran : l'image elle-même, puis les autres informations en texte.
+        image = {"type": "image", "data": result["image_base64"], "mimeType": "image/png"}
+        rest = {k: v for k, v in result.items() if k != "image_base64"}
+        return {"content": [image, text(json.dumps(rest, ensure_ascii=False))]}
     is_error = isinstance(result, dict) and bool(result.get("error"))
     return {"content": [text(json.dumps(result, ensure_ascii=False, indent=1))], "isError": is_error}
 
@@ -246,15 +122,12 @@ def handle(msg):
             "protocolVersion": params.get("protocolVersion") or DEFAULT_PROTOCOL,
             "capabilities": {"tools": {}},
             "serverInfo": SERVER_INFO,
-            "instructions": (
-                "Pilote Rhino 8 et Grasshopper ouverts sur cet ordinateur. Commence par rhino_ping. "
-                "Utilise rhino_capture_view pour vérifier visuellement un résultat."
-            ),
+            "instructions": INSTRUCTIONS,
         }
     elif method == "ping":
         result = {}
     elif method == "tools/list":
-        result = {"tools": [{k: v for k, v in t.items() if k != "command"} for t in TOOLS]}
+        result = {"tools": TOOLS}
     elif method == "tools/call":
         result = call_tool(params.get("name"), params.get("arguments"))
     else:
@@ -268,7 +141,7 @@ def send(obj):
 
 
 def main():
-    log("démarré, Rhino attendu sur %s:%d" % (HOST, PORT))
+    log("démarré (%d outils), Rhino attendu sur %s:%d" % (len(TOOLS), HOST, PORT))
     for raw in sys.stdin.buffer:
         line = raw.strip()
         if not line:

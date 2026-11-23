@@ -126,10 +126,12 @@ class Context(object):
         self.tmp = tempfile.mkdtemp(prefix="rhino_mcp_test_")
         self.state = {}
 
-    def call_raw(self, tool, arguments=None, timeout=180):
-        return self.client.request("tools/call", {"name": tool, "arguments": arguments or {}}, timeout)
+    def call_raw(self, tool, arguments=None, timeout=None):
+        # le serveur abandonne au bout de --timeout ; le client attend un peu plus pour recevoir son message
+        wait = timeout or self.args.timeout + 30
+        return self.client.request("tools/call", {"name": tool, "arguments": arguments or {}}, wait)
 
-    def call(self, tool, arguments=None, timeout=180):
+    def call(self, tool, arguments=None, timeout=None):
         """Appelle un outil, échoue s'il renvoie une erreur, renvoie le JSON décodé."""
         result = self.call_raw(tool, arguments, timeout)
         text = result_text(result)
@@ -178,6 +180,78 @@ def rhino_document_info(ctx):
     r = ctx.call("rhino_get_document_info")
     for key in ("units", "tolerance", "layers", "views", "object_count"):
         check(key in r, "clé « %s » absente de rhino_get_document_info" % key)
+
+
+def add_box(ctx, size=10, name=None):
+    """Crée une boîte via rhino_execute_python (indépendant des outils de géométrie) ; renvoie son id."""
+    code = (
+        "import Rhino.Geometry as G\n"
+        "bb = G.BoundingBox(G.Point3d(0, 0, 0), G.Point3d(%g, %g, %g))\n"
+        "a = doc.CreateDefaultAttributes()\n"
+        "a.Name = %r\n"
+        "result = str(doc.Objects.AddBrep(G.Box(bb).ToBrep(), a))\n" % (size, size, size, name or "")
+    )
+    return ctx.call("rhino_execute_python", {"code": code})["result"]
+
+
+@test("rhino_document")
+def rhino_fichiers(ctx):
+    box = add_box(ctx, name="boite_fichiers")
+    path_3dm = ctx.path("essai.3dm")
+    saved = ctx.call("rhino_document", {"action": "save_as", "path": path_3dm})
+    check(os.path.isfile(path_3dm) and not saved["modified"] and saved["path"],
+          "save_as n'a pas enregistré : %s" % saved)
+    v7 = ctx.call("rhino_document", {"action": "save_as", "path": ctx.path("essai_v7.3dm"), "version": 7})
+    with open(v7["saved_copy"], "rb") as fh:
+        check(fh.read(32)[24:32].strip() == b"70", "save_as version 7 n'a pas écrit un fichier Rhino 7")
+    check(v7["path"] == saved["path"], "après une copie en version 7, le document doit rester sur son fichier")
+    for ext in ("stl", "obj", "dwg", "step"):  # formats qui posent des questions en ligne de commande
+        path = ctx.path("boite." + ext)
+        exp = ctx.call("rhino_document", {"action": "export", "path": path, "ids": [box]})
+        check(os.path.getsize(path) > 0 and exp["objects"] == 1, "export %s inattendu : %s" % (ext, exp))
+        imp = ctx.call("rhino_document", {"action": "import", "path": path})
+        check(imp["imported"] >= 1, "import %s : aucun objet importé (%s)" % (ext, imp))
+    whole = ctx.call("rhino_document", {"action": "export", "path": ctx.path("tout.fbx")})
+    check(whole["objects"] == "document" and whole["size_bytes"] > 0, "export du document entier : %s" % whole)
+    ctx.call_error("rhino_document", {"action": "export", "path": ctx.path("boite.stl")}, contains="existe déjà")
+    ctx.call("rhino_document", {"action": "export", "path": ctx.path("boite.stl"), "overwrite": True})
+    ctx.call_error("rhino_document", {"action": "export", "path": ctx.path("x.xyz")}, contains="non pris en charge")
+    status = ctx.call("rhino_ping")
+    check(status["path"] == saved["path"], "un export a changé le fichier du document : %s" % status)
+    ctx.call_error("rhino_document", {"action": "new"}, contains="non enregistr")  # garde-fou
+    ctx.call("rhino_document", {"action": "new", "discard_changes": True})
+    opened = ctx.call("rhino_document", {"action": "open", "path": path_3dm})
+    check(opened["object_count"] == 1 and opened["path"], "réouverture du .3dm inattendue : %s" % opened)
+    ctx.call("rhino_document", {"action": "save"})
+    ctx.call_error("rhino_document", {"action": "open", "path": ctx.path("absent.3dm")}, contains="introuvable")
+    ctx.call("rhino_document", {"action": "new"})
+
+
+@test("rhino_undo")
+def rhino_annulation(ctx):
+    box = add_box(ctx, name="boite_undo")
+    ids = lambda: [o["id"] for o in ctx.call("rhino_get_objects", {"limit": 1000})["objects"]]
+    undo = ctx.call("rhino_undo", {"action": "undo"})
+    check(undo["steps_done"] == 1 and box not in ids(), "undo n'a pas retiré la boîte : %s" % undo)
+    redo = ctx.call("rhino_undo", {"action": "redo"})
+    check(redo["steps_done"] == 1 and box in ids(), "redo n'a pas rétabli la boîte : %s" % redo)
+
+
+@test("rhino_run_command")
+def rhino_commande(ctx):
+    r = ctx.call("rhino_run_command", {"command": "_Sphere 0,0,0 5"})
+    check(r["success"] and r["created_count"] == 1, "la commande Sphere n'a pas créé une sphère : %s" % r)
+    ctx.call("rhino_execute_python", {"code": "doc.Objects.Delete(System.Guid('%s'), True)" % r["created"][0]["id"]})
+    r = ctx.call("rhino_run_command", {"command": "_SelNone"})
+    check(r["success"] and not r["selected"], "_SelNone a laissé une sélection : %s" % r)
+
+
+@test("rhino_list_plugins")
+def rhino_plugins(ctx):
+    r = ctx.call("rhino_list_plugins", {"query": "grasshopper"})
+    check(any("grasshopper" in p["name"].lower() for p in r["plugins"]), "Grasshopper absent des plug-ins : %s" % r)
+    r = ctx.call("rhino_list_plugins", {"query": "sphere", "include_commands": True})
+    check("Sphere" in r.get("commands", []), "commande Sphere absente : %s" % r.get("commands"))
 
 
 @test("rhino_execute_python", "rhino_get_objects")
@@ -245,12 +319,16 @@ def gh_curseur_vers_cercle(ctx):
 def main():
     parser = argparse.ArgumentParser(description="Test de bout en bout du MCP Rhino & Grasshopper.")
     parser.add_argument("--port", type=int, default=int(os.environ.get("RHINO_MCP_PORT", "1999")))
-    parser.add_argument("--timeout", type=float, default=180, help="délai max par commande (s)")
+    parser.add_argument("--timeout", type=float, default=60,
+                        help="délai max par commande dans Rhino (s) : un blocage devient un échec clair")
     parser.add_argument("--sans-gh", action="store_true", help="ne pas tester Grasshopper")
     parser.add_argument("-k", dest="filtre", help="ne lancer que les tests dont le nom contient ce texte")
+    parser.add_argument("--abandonner-modifications", action="store_true",
+                        help="autoriser le test à remplacer un document Rhino non enregistré")
     args = parser.parse_args()
-    try:  # console : encodage natif ; tube (Git Bash, outils) : UTF-8
-        sys.stdout.reconfigure(errors="replace", **({} if sys.stdout.isatty() else {"encoding": "utf-8"}))
+    try:  # console : encodage natif ; tube (Git Bash, outils) : UTF-8 ; affichage ligne par ligne
+        sys.stdout.reconfigure(errors="replace", line_buffering=True,
+                               **({} if sys.stdout.isatty() else {"encoding": "utf-8"}))
     except AttributeError:
         pass
 
@@ -269,6 +347,14 @@ def main():
         ping = client.request("tools/call", {"name": "rhino_ping", "arguments": {}}, timeout=30)
         if ping.get("isError"):
             print("Rhino injoignable :\n" + result_text(ping))
+            return 2
+
+        # Préparation : un document Rhino neuf (refusé si ton document a des modifications non enregistrées).
+        prep = client.request("tools/call", {"name": "rhino_document", "arguments": {
+            "action": "new", "discard_changes": args.abandonner_modifications}}, timeout=60)
+        if prep.get("isError"):
+            print("Préparation impossible : " + result_text(prep))
+            print("Enregistre ton document Rhino (ou relance avec --abandonner-modifications), puis relance le test.")
             return 2
 
         ctx = Context(client, args)

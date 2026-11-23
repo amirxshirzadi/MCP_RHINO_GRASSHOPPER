@@ -9,8 +9,8 @@ import Rhino
 import rhinoscriptsyntax as rs
 import scriptcontext as sc
 
-from .registry import command
-from .util import jsonable
+from .registry import McpError, command
+from .util import MAX_ITEMS, close_dangling_undo_records, ensure_idle, iter_objects, jsonable, object_summary
 
 
 def _get_gh_doc():
@@ -22,6 +22,7 @@ def _get_gh_doc():
 def rhino_execute_python(code):
     """Exécute du Python dans Rhino. Affecter `result` pour renvoyer une valeur.
     Fonctionne aussi sans document actif (doc vaut alors None), par ex. pour en créer un."""
+    ensure_idle()
     d = Rhino.RhinoDoc.ActiveDoc
     if d is not None:
         sc.doc = d
@@ -50,6 +51,7 @@ def rhino_execute_python(code):
         try:
             if undo:
                 d.EndUndoRecord(undo)
+            close_dangling_undo_records(Rhino.RhinoDoc.ActiveDoc)
         except Exception:
             pass
         active = Rhino.RhinoDoc.ActiveDoc
@@ -59,3 +61,30 @@ def rhino_execute_python(code):
     if error:
         out["error"] = error
     return out
+
+
+@command("rhino_run_command")
+def rhino_run_command(command, echo=False):
+    """Lance une commande Rhino (macro) et renvoie les objets créés et la sortie de la ligne de commande."""
+    ensure_idle()
+    if not (command or "").strip():
+        raise McpError("Commande vide.")
+    d = Rhino.RhinoDoc.ActiveDoc
+    before = set(o.Id for o in iter_objects(d)) if d is not None else set()
+    history = Rhino.RhinoApp.CommandHistoryWindowText or ""
+    ok = Rhino.RhinoApp.RunScript(command, bool(echo))
+    after = Rhino.RhinoApp.CommandHistoryWindowText or ""
+    output = after[len(history):] if after.startswith(history) else after[-3000:]
+    d = Rhino.RhinoDoc.ActiveDoc
+    if d is None:
+        return {"success": bool(ok), "output": output.strip()[-4000:], "created": [], "selected": []}
+    created = [o for o in iter_objects(d) if o.Id not in before]
+    selected = [str(o.Id) for o in d.Objects.GetSelectedObjects(False, False)]
+    d.Views.Redraw()
+    return {
+        "success": bool(ok),
+        "output": output.strip()[-4000:],
+        "created": [object_summary(o) for o in created[:MAX_ITEMS]],
+        "created_count": len(created),
+        "selected": selected[:MAX_ITEMS],
+    }

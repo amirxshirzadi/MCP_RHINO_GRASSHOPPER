@@ -26,6 +26,22 @@ def doc():
     return d
 
 
+def ensure_idle():
+    """Refuse de modifier le document pendant qu'une commande Rhino est en cours (dessin, sélection...)."""
+    if Rhino.Commands.Command.InCommand():
+        raise McpError("Une commande Rhino est en cours : termine-la ou annule-la (Échap), puis réessaie.")
+
+
+def close_dangling_undo_records(d):
+    """Un script a pu laisser un enregistrement d'annulation ouvert : le refermer, sinon Ctrl+Z ne marche plus."""
+    if d is None or Rhino.Commands.Command.InCommand():
+        return
+    for _ in range(10):
+        if not d.UndoRecordingIsActive:
+            break
+        d.EndUndoRecord(d.CurrentUndoRecordSerialNumber)
+
+
 def impl(o):
     """pythonnet 3 renvoie parfois une vue « interface » : récupère l'objet réel."""
     return getattr(o, "__implementation__", o)
@@ -347,6 +363,7 @@ class Undo(object):
         self.record = 0
 
     def __enter__(self):
+        ensure_idle()
         self.doc = doc()
         self.record = self.doc.BeginUndoRecord("MCP : " + self.label)
         return self.doc

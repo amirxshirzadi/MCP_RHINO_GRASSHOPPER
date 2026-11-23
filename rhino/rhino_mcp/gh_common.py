@@ -10,10 +10,14 @@ from .util import impl
 
 
 def gh_module(load=True):
-    """Module Grasshopper, en ouvrant Grasshopper si besoin."""
+    """Module Grasshopper, en ouvrant (ou réaffichant) Grasshopper si besoin."""
     try:
         import Grasshopper
         if Grasshopper.Instances.ActiveCanvas is not None:
+            editor = Grasshopper.Instances.DocumentEditor
+            if load and editor is not None and not editor.Visible:
+                # Éditeur fermé : Grasshopper coupe alors le calcul du document. On le réaffiche.
+                Rhino.RhinoApp.RunScript("_Grasshopper", False)
             return Grasshopper
     except Exception:
         pass
@@ -38,7 +42,10 @@ def gh_doc(create=True):
         gdoc = gh.Kernel.GH_Document()
         gh.Instances.DocumentServer.AddDocument(gdoc)
         canvas.Document = gdoc
-    return gh, impl(gdoc)
+    gdoc = impl(gdoc)
+    if not gdoc.Enabled:  # document désactivé (éditeur fermé) : rien ne serait calculé
+        gdoc.Enabled = True
+    return gh, gdoc
 
 
 def refresh(gh):

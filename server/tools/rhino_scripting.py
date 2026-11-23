@@ -15,4 +15,21 @@ TOOLS = [
         required=["code"],
         destructive=True,
     ),
+    tool(
+        "rhino_run_command",
+        (
+            "Lance n'importe quelle commande Rhino comme si elle était tapée (macro), par ex. "
+            "'_-Make2D _Enter', '_SelAll', '_Undo', '_-Export \"C:\\\\dossier\\\\plan.dwg\" _Enter'. "
+            "Utilise la version « tiret » des commandes (_-Commande) et les noms anglais préfixés de « _ » : "
+            "les versions à boîte de dialogue bloqueraient Rhino jusqu'à ce que l'utilisateur la ferme. Pour agir "
+            "sur des objets précis, sélectionne-les d'abord (rhino_select_objects). Renvoie les objets créés, la "
+            "sélection et ce que la commande a écrit dans la ligne de commande."
+        ),
+        {
+            "command": {"type": "string", "description": "Macro Rhino (ex. '_-Sphere 0,0,0 10')."},
+            "echo": {"type": "boolean", "default": False, "description": "Afficher la macro dans la ligne de commande."},
+        },
+        required=["command"],
+        destructive=True,
+    ),
 ]

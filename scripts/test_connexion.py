@@ -314,6 +314,96 @@ def rhino_objets(ctx):
     ctx.call_error("rhino_transform_objects", {"ids": [box], "operation": "teleport"}, contains="introuvable")
 
 
+def geometry(ctx, obj_id):
+    return ctx.call("rhino_get_object_details", {"ids": [obj_id]})["objects"][0]["geometry"]
+
+
+@test("rhino_create_geometry")
+def rhino_creation(ctx):
+    layer = "Test MCP::Création"
+    shapes = [
+        {"type": "point", "point": [1, 2, 3]},
+        {"type": "line", "start": [0, 0, 0], "end": [10, 0, 0]},
+        {"type": "polyline", "points": [[0, 0, 0], [10, 0, 0], [10, 10, 0]], "closed": True},
+        {"type": "curve", "points": [[0, 0, 0], [5, 5, 0], [10, 0, 0], [15, 5, 0]]},
+        {"type": "circle", "center": [0, 0, 0], "radius": 5},
+        {"type": "arc", "center": [0, 0, 0], "radius": 5, "start_angle": 0, "end_angle": 90},
+        {"type": "arc", "points": [[0, 0, 0], [5, 5, 0], [10, 0, 0]]},
+        {"type": "ellipse", "center": [0, 0, 0], "radius": 10, "radius2": 5},
+        {"type": "rectangle", "corner": [0, 0, 0], "width": 20, "height": 10},
+        {"type": "polygon", "center": [0, 0, 0], "radius": 10, "sides": 6},
+        {"type": "plane_surface", "corner": [0, 0, 0], "width": 10, "height": 5},
+        {"type": "sphere", "center": [0, 0, 0], "radius": 10},
+        {"type": "box", "corner": [0, 0, 0], "width": 10, "depth": 10, "height": 10},
+        {"type": "box", "corner": [5, 5, 5], "corner2": [15, 15, 15]},
+        {"type": "cylinder", "center": [0, 0, 0], "radius": 2, "height": 10},
+        {"type": "cone", "center": [0, 0, 0], "radius": 2, "height": 10},
+        {"type": "torus", "center": [0, 0, 0], "radius": 10, "radius2": 2},
+        {"type": "mesh", "vertices": [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], "faces": [[0, 1, 2, 3]]},
+    ]
+    ids = {}
+    for spec in shapes:
+        r = ctx.call("rhino_create_geometry", dict(spec, layer=layer))
+        check(r["count"] >= 1, "création %s : %s" % (spec["type"], r))
+        ids.setdefault(spec["type"], r["ids"][0])
+    check(abs(geometry(ctx, ids["circle"])["circle"]["radius"] - 5) < 1e-6, "rayon du cercle")
+    check(abs(geometry(ctx, ids["rectangle"]).get("area", 0) - 200) < 1e-6, "aire du rectangle")
+    check(abs(geometry(ctx, ids["sphere"])["volume"] - 4188.790205) < 1e-3, "volume de la sphère")
+    check(abs(geometry(ctx, ids["cone"])["volume"] - 41.887902) < 1e-3, "volume du cône")
+    ctx.call_error("rhino_create_geometry", {"type": "dodecaedre"}, contains="inconnu")
+    ctx.call_error("rhino_create_geometry", {"type": "circle", "center": [0, 0, 0]}, contains="radius")
+    everything = ctx.call("rhino_get_objects", {"layer": layer, "limit": 1000})["objects"]
+    ctx.call("rhino_delete_objects", {"ids": [o["id"] for o in everything]})
+
+
+@test("rhino_geometry_operation")
+def rhino_operations(ctx):
+    layer = "Test MCP::Opérations"
+    new = lambda **spec: ctx.call("rhino_create_geometry", dict(spec, layer=layer))["ids"][0]  # noqa: E731
+    op = lambda **args: ctx.call("rhino_geometry_operation", args)  # noqa: E731
+    box = lambda c0, c1: new(type="box", corner=c0, corner2=c1)  # noqa: E731
+
+    union = op(operation="boolean_union", ids=[box([0, 0, 0], [10, 10, 10]), box([5, 5, 5], [15, 15, 15])])
+    check(union["count"] == 1 and abs(geometry(ctx, union["ids"][0])["volume"] - 1875) < 1e-6
+          and len(union["deleted_input"]) == 2, "union : %s" % union)
+    diff = op(operation="boolean_difference", ids=[box([0, 0, 0], [10, 10, 10])],
+              other_ids=[box([5, 5, 5], [15, 15, 15])])
+    check(abs(geometry(ctx, diff["ids"][0])["volume"] - 875) < 1e-6, "différence : %s" % diff)
+    inter = op(operation="boolean_intersection", ids=[box([0, 0, 0], [10, 10, 10])],
+               other_ids=[box([5, 5, 5], [15, 15, 15])])
+    check(abs(geometry(ctx, inter["ids"][0])["volume"] - 125) < 1e-6, "intersection booléenne : %s" % inter)
+
+    rect = new(type="rectangle", corner=[0, 0, 0], width=20, height=10)
+    ext = op(operation="extrude", ids=[rect], height=5)
+    check(abs(geometry(ctx, ext["ids"][0]).get("volume", 0) - 1000) < 1e-6, "extrusion fermée : %s" % ext)
+    c1, c2 = new(type="circle", center=[0, 0, 0], radius=5), new(type="circle", center=[0, 0, 10], radius=3)
+    check(op(operation="loft", ids=[c1, c2])["count"] == 1, "loft")
+    line = new(type="line", start=[5, 0, 0], end=[5, 0, 10])
+    check(op(operation="revolve", ids=[line], axis=[[0, 0, 0], [0, 0, 1]])["count"] == 1, "révolution")
+    rail = new(type="line", start=[0, 0, 0], end=[0, 0, 20])
+    profile = new(type="circle", center=[0, 0, 0], radius=2)
+    check(op(operation="sweep1", ids=[profile], rail_id=rail)["count"] == 1, "balayage")
+    pipe = op(operation="pipe", ids=[rail], radius=1)
+    check(geometry(ctx, pipe["ids"][0]).get("solid"), "tuyau fermé : %s" % pipe)
+    off = op(operation="offset", ids=[c1], distance=2)
+    check(off["count"] >= 1, "décalage : %s" % off)
+    a, b = new(type="line", start=[0, 0, 0], end=[10, 0, 0]), new(type="line", start=[10, 0, 0], end=[10, 10, 0])
+    joined = op(operation="join", ids=[a, b])
+    check(joined["count"] == 1 and abs(geometry(ctx, joined["ids"][0])["length"] - 20) < 1e-6, "join : %s" % joined)
+    tri = new(type="polyline", points=[[0, 0, 0], [10, 0, 0], [10, 10, 0]], closed=True)
+    check(op(operation="explode", ids=[tri])["count"] == 3, "explode d'un triangle")
+    tube = new(type="cylinder", center=[50, 0, 0], radius=2, height=10, cap=False)
+    check(geometry(ctx, op(operation="cap", ids=[tube])["ids"][0]).get("solid"), "cap")
+    sphere = new(type="sphere", center=[0, 0, 50], radius=5)
+    check(op(operation="mesh", ids=[sphere])["objects"][0]["type"] == "Mesh", "conversion en maillage")
+    x1, x2 = new(type="line", start=[0, -5, 0], end=[0, 5, 0]), new(type="line", start=[-5, 0, 0], end=[5, 0, 0])
+    cross = op(operation="intersect", ids=[x1], other_ids=[x2])
+    check(cross["count"] == 1 and cross["objects"][0]["type"] == "Point", "intersection de courbes : %s" % cross)
+    ctx.call_error("rhino_geometry_operation", {"operation": "boolean_union", "ids": [x1, x2]}, contains="surface")
+    everything = ctx.call("rhino_get_objects", {"layer": layer, "limit": 1000})["objects"]
+    ctx.call("rhino_delete_objects", {"ids": [o["id"] for o in everything]})
+
+
 @test("rhino_execute_python", "rhino_get_objects")
 def rhino_python_et_objets(ctx):
     code = (
